@@ -6,9 +6,70 @@ import random as rd
 import KernelDensities as Kde
 import SymbolicDensityRegression as sdr 
 from multiprocessing import Process
+from KDEpy import FFTKDE
+from AuxiliaryFunctions import *
 warnings.filterwarnings('ignore')
 pd.set_option('display.max_colwidth', None)
  
+
+def all_qf(data, kernel, bw_rule, gridSize):
+    return [get_qf(data, kernel, bw_rule, gridSize),get_qf_sym(data, kernel,bw_rule, gridSize)]
+
+def get_qf(data, kernel, bw_rule, gridSize): 
+    x,y=FFTKDE(kernel=kernel, bw=bw_rule).fit(data).evaluate(gridSize)
+
+    cdf_x = np.zeros(gridSize)
+    cdf_x[0] = 0
+    c = 1
+    xMin=np.min(x)
+    for i in range(1, len(x)):
+        delta = (x[i] - xMin) / i
+        ys = y[0:i]
+        k = (ys[0] + ys[i - 1]) / 2
+        p = sum(ys[1:(i - 1)])
+        cdf_x[c] = delta * (k + p)
+        c = c + 1
+
+    points_QF = get_points(0, 1, gridSize)
+    QF = np.zeros(gridSize)
+     
+    c = 0
+    for p in points_QF:
+        h = cdf_x <= p
+        x_index = max(np.where(h)[0])
+         
+        QF[c] = x[x_index]
+        c += 1
+    return QF
+    
+def get_qf_sym(data, kernel, bw_rule, gridSize): 
+    data=[-1*xi for xi in data]
+    x,y=FFTKDE(kernel=kernel, bw=bw_rule).fit(data).evaluate(gridSize)
+
+    cdf_x = np.zeros(gridSize)
+    cdf_x[0] = 0
+    c = 1
+    xMin=np.min(x)
+    for i in range(1, len(x)):
+        delta = (x[i] - xMin) / i
+        ys = y[0:i]
+        k = (ys[0] + ys[i - 1]) / 2
+        p = sum(y[1:(i - 1)])
+        cdf_x[c] = delta * (k + p)
+        c = c + 1
+
+    points_QF = get_points(0, 1, gridSize)
+    QF = np.zeros(gridSize)
+     
+    c = 0
+    for p in points_QF:
+        h = cdf_x <= p
+        x_index = max(np.where(h)[0])
+         
+        QF[c] = x[x_index]
+        c += 1
+    return QF
+
 
 def compute_quantiles(args):
     """Helper function to compute quantiles using KDE."""
@@ -64,10 +125,10 @@ simulation_columns_1 = ['Simulation',
                         'Test individuals'
                     ]
 
-def get_simulation_response(data_range, GridSize ,simulation, data_Qf, co_variables, kfoldRepeats,
+def get_simulation_response(sufix,data_range, GridSize ,simulation, data_Qf, co_variables, kfoldRepeats,
                            n_individuals, n_regressors, num_data_points, CofficientsConfig,variables, response, 
                            variable,error,gen_type_des,var_factor,test_variables):
-     sufix="011" 
+      
      logging.basicConfig(filename="simulation_get_simulation_%s.log"%sufix, level=logging.INFO, 
                                                  format="%(asctime)s - %(levelname)s - %(message)s")
      logging.info("       Start get_simulation_response (%s|%s|%s|%s) ",simulation,gen_type_des,error,var_factor)
@@ -196,14 +257,11 @@ def get_config_mean(ind,means_,coef):
     #return mn+coef[0]
 
 def get_response_aux(ind,cof,qtl):
-    cof = np.array(cof)
-    qtl = np.array(qtl[ind])
-    mn = np.sum(cof[:, 0].reshape(-1, 1)*qtl[:, 0]+cof[:, 1].reshape(-1, 1)*qtl[:, 1], axis=0)
-    return mn
-    #mn=np.zeros(GridSize)
-    #for t in range(len(cof)):  
-    #    mn=mn+(np.multiply(cof[t][0],qtl[ind][t][0])+np.multiply(cof[t][1],qtl[ind][t][1]))
-    #return mn
+    ret = np.zeros(GridSize)
+    for k in range(len(cof)):
+        ret = ret + np.multiply(cof[k][0],qtl[ind][k][0])+np.multiply(cof[k][1],qtl[ind][k][1])
+        #ret1 = [sum(x) for x in zip(np.multiply(cof[k][0],qtl_uniforms[ind][k][0]), np.multiply(cof[k][1],qtl_uniforms[ind][k][1]))] 
+    return ret 
 
 def get_response():
     for current_coef, cnf in enumerate(coefficients):
@@ -263,15 +321,16 @@ def get_test_variables(variables_ind, num_test, kFold):
     # return test_variables
  
 if __name__ == '__main__':
-    suffix="011"
-    n_simul = 10 # int(input("How Many Simulations? "))
+    suffix="010"
+    n_simul = 30 # int(input("How Many Simulations? "))
     kfoldRepeats = 10 #int(input("K-Fold Repeats? "))
-    num_data_points = 5000 # int(input("Num Datapoints? ")) 
+    num_data_points = 10000 # int(input("Num Datapoints? ")) 
     n_individuals = 250 #int(input("Num individuals (m)? "))
     GridSize = 1000 #int(input("GridSize? "))  # = 500
     #kernel = str(input("Kernel? "))  # = 500
     #if kernel=="":
     kernel="gaussian"
+    bw_rule="silverman"
 
     # Configure Logging
     logging.basicConfig(filename="simulation_%s.log"%suffix, level=logging.INFO, 
@@ -362,14 +421,15 @@ if __name__ == '__main__':
         #stds=[[np.random.uniform(dist_coef[0]*sigmas[l],dist_coef[1]*sigmas[l]) for l in range(3)] for _ in range(n_individuals)]
         err_means=[[get_config_mean(ind, means_, cnf) for cnf in coefficients] for ind in range(n_individuals)]
         logging.info("          Start Quantiles ") 
-        qtl_uniforms=[[kde.get_quantiles(uniforms[ind][k]) for k in range(3)] for ind in range(n_individuals)]
-        qtl_normals=[[kde.get_quantiles(normals[ind][k]) for k in range(3)] for ind in range(n_individuals)]
-        qtl_lognormals=[[kde.get_quantiles(lognormals[ind][k]) for k in range(3)] for ind in range(n_individuals)]
+        qtl_uniforms=[[all_qf(uniforms[ind][k], kernel, bw_rule, GridSize) for k in range(3)] for ind in range(n_individuals)]
+        qtl_normals=[[all_qf(normals[ind][k], kernel, bw_rule, GridSize) for k in range(3)] for ind in range(n_individuals)]
+        qtl_lognormals=[[all_qf(lognormals[ind][k], kernel, bw_rule, GridSize) for k in range(3)] for ind in range(n_individuals)]
         logging.info("          End Quantiles ") 
         logging.info("          Start Erros ") 
         err_uniforms=[]
         err_normals=[]
         err_lognormals=[]
+        rnd=[0 if rd.random()<thold else 1 for _ in range(n_individuals)]
         for ind in range(n_individuals):
             curr_u,curr_n,curr_l=[],[],[]
             for k in range(len(coefficients)):
@@ -397,19 +457,19 @@ if __name__ == '__main__':
         for k in range(len(coefficients)): 
             for mu in range(len(factors)): 
                 for vr in range(len(var_factors)): 
-                    data_err_unif_Qf_all["Y_e_%s%s%s"%(k,mu,vr)]=[kde.get_quantiles(err_uniforms[ind][k][mu][vr]) for ind in range(n_individuals)]
-                    data_err_normal_Qf_all["Y_e_%s%s%s"%(k,mu,vr)]=[kde.get_quantiles(err_normals[ind][k][mu][vr]) for ind in range(n_individuals)]
-                    data_err_log_Qf_all["Y_e_%s%s%s"%(k,mu,vr)]=[kde.get_quantiles(err_lognormals[ind][k][mu][vr]) for ind in range(n_individuals)]    
+                    data_err_unif_Qf_all["Y_e_%s%s%s"%(k,mu,vr)]=[ get_qf(err_uniforms[ind][k][mu][vr], kernel, bw_rule, GridSize) if rnd[ind]==0 else get_qf_sym(err_uniforms[ind][k][mu][vr], kernel, bw_rule, GridSize)  for ind in range(n_individuals)] #  kde.get_quantiles(err_uniforms[ind][k][mu][vr]) for ind in range(n_individuals)]
+                    data_err_normal_Qf_all["Y_e_%s%s%s"%(k,mu,vr)]=[ get_qf(err_normals[ind][k][mu][vr], kernel, bw_rule, GridSize) if rnd[ind]==0 else get_qf_sym(err_normals[ind][k][mu][vr], kernel, bw_rule, GridSize)  for ind in range(n_individuals)] #[kde.get_quantiles(err_normals[ind][k][mu][vr]) for ind in range(n_individuals)]
+                    data_err_log_Qf_all["Y_e_%s%s%s"%(k,mu,vr)]=[ get_qf(err_lognormals[ind][k][mu][vr], kernel, bw_rule, GridSize) if rnd[ind]==0 else get_qf_sym(err_lognormals[ind][k][mu][vr], kernel, bw_rule, GridSize)  for ind in range(n_individuals)] #[kde.get_quantiles(err_lognormals[ind][k][mu][vr]) for ind in range(n_individuals)]        
         
         
-        rnd=[0 if rd.random()<thold else 1 for _ in range(n_individuals)]
-        for k in range(len(coefficients)): 
-            for mu in range(len(factors)):
-                #print("Start mu=%s"%(mu))
-                for vr in range(len(var_factors)): 
-                    data_err_unif_Qf["Y_e_%s%s%s"%(k,mu,vr)]=[data_err_unif_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][i][rnd[i]] for i in range(n_individuals)]
-                    data_err_normal_Qf["Y_e_%s%s%s"%(k,mu,vr)]=[data_err_normal_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][i][rnd[i]] for i in range(n_individuals)]
-                    data_err_log_Qf["Y_e_%s%s%s"%(k,mu,vr)]=[data_err_log_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][i][rnd[i]] for i in range(n_individuals)] 
+        
+        #for k in range(len(coefficients)): 
+        #    for mu in range(len(factors)):
+        #        #print("Start mu=%s"%(mu))
+        #        for vr in range(len(var_factors)): 
+        #            data_err_unif_Qf["Y_e_%s%s%s"%(k,mu,vr)]=[data_err_unif_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][i][rnd[i]] for i in range(n_individuals)]
+        #            data_err_normal_Qf["Y_e_%s%s%s"%(k,mu,vr)]=[data_err_normal_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][i][rnd[i]] for i in range(n_individuals)]
+        #            data_err_log_Qf["Y_e_%s%s%s"%(k,mu,vr)]=[data_err_log_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][i][rnd[i]] for i in range(n_individuals)] 
         logging.info("          End Responses ") 
         logging.info("      End - Get Synthectic Data ") 
         get_response()
@@ -417,17 +477,17 @@ if __name__ == '__main__':
         for k in range(len(coefficients)):
             for mu in range(len(factors)): 
                 for vr in range(len(var_factors)): 
-                    df_Unif_responses["Y_e_u_%s%s%s"%(k,mu,vr)]=[df_Unif_responses["Y_%s"%k][ind] + data_err_unif_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind]   for ind in range(n_individuals)]
-                    df_Unif_responses["Y_e_n_%s%s%s"%(k,mu,vr)]=[df_Unif_responses["Y_%s"%k][ind] + data_err_normal_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind]   for ind in range(n_individuals)]
-                    df_Unif_responses["Y_e_l_%s%s%s"%(k,mu,vr)]=[df_Unif_responses["Y_%s"%k][ind] + data_err_log_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind]  for ind in range(n_individuals)]
+                    df_Unif_responses["Y_e_u_%s%s%s"%(k,mu,vr)]=[df_Unif_responses["Y_%s"%k][ind] + data_err_unif_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind]   for ind in range(n_individuals)]
+                    df_Unif_responses["Y_e_n_%s%s%s"%(k,mu,vr)]=[df_Unif_responses["Y_%s"%k][ind] + data_err_normal_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind]   for ind in range(n_individuals)]
+                    df_Unif_responses["Y_e_l_%s%s%s"%(k,mu,vr)]=[df_Unif_responses["Y_%s"%k][ind] + data_err_log_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind]  for ind in range(n_individuals)]
                     
-                    df_Norm_responses["Y_e_u_%s%s%s"%(k,mu,vr)]=[df_Norm_responses["Y_%s"%k][ind] + data_err_unif_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
-                    df_Norm_responses["Y_e_n_%s%s%s"%(k,mu,vr)]=[df_Norm_responses["Y_%s"%k][ind] + data_err_normal_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
-                    df_Norm_responses["Y_e_l_%s%s%s"%(k,mu,vr)]=[df_Norm_responses["Y_%s"%k][ind] + data_err_log_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
+                    df_Norm_responses["Y_e_u_%s%s%s"%(k,mu,vr)]=[df_Norm_responses["Y_%s"%k][ind] + data_err_unif_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
+                    df_Norm_responses["Y_e_n_%s%s%s"%(k,mu,vr)]=[df_Norm_responses["Y_%s"%k][ind] + data_err_normal_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
+                    df_Norm_responses["Y_e_l_%s%s%s"%(k,mu,vr)]=[df_Norm_responses["Y_%s"%k][ind] + data_err_log_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
                     
-                    df_LogNorm_responses["Y_e_u_%s%s%s"%(k,mu,vr)]=[df_LogNorm_responses["Y_%s"%k][ind] + data_err_unif_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
-                    df_LogNorm_responses["Y_e_n_%s%s%s"%(k,mu,vr)]=[df_LogNorm_responses["Y_%s"%k][ind] + data_err_normal_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
-                    df_LogNorm_responses["Y_e_l_%s%s%s"%(k,mu,vr)]=[df_LogNorm_responses["Y_%s"%k][ind] + data_err_log_Qf["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]      
+                    df_LogNorm_responses["Y_e_u_%s%s%s"%(k,mu,vr)]=[df_LogNorm_responses["Y_%s"%k][ind] + data_err_unif_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
+                    df_LogNorm_responses["Y_e_n_%s%s%s"%(k,mu,vr)]=[df_LogNorm_responses["Y_%s"%k][ind] + data_err_normal_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]
+                    df_LogNorm_responses["Y_e_l_%s%s%s"%(k,mu,vr)]=[df_LogNorm_responses["Y_%s"%k][ind] + data_err_log_Qf_all["Y_e_%s%s%s"%(k,mu,vr)][ind] for ind in range(n_individuals)]      
 
         logging.info("     Ended Set error responses ")  
         variables_ind=["ind%s"%i for i in range(n_individuals)]
@@ -488,12 +548,12 @@ if __name__ == '__main__':
                    
                     logging.info("       Start Job ") 
                 
-                    job = Process(target=get_simulation_response, args=(data_range, GridSize ,sim, df, co_variables, kfoldRepeats,
+                    job = Process(target=get_simulation_response, args=(sufix, data_range, GridSize ,sim, df, co_variables, kfoldRepeats,
                                                                                         n_individuals, len(coef[1]), num_data_points, get_config_str(coef), indi, "Y", 'Individual','','%s'%distrib,"",test_variables,))
                     job.start()
                     uniform_jobs.append(job)
                     logging.info("       Start Job1 ") 
-                    job1 = Process(target=get_simulation_response, args=(data_range, GridSize ,sim, df_small, co_variables, 10,
+                    job1 = Process(target=get_simulation_response, args=(sufix, data_range, GridSize ,sim, df_small, co_variables, 10,
                                                                                         n_individuals_small, len(coef[1]), num_data_points, get_config_str(coef), small_sample_individuals, "Y", 'Individual','','%s'%distrib,"",test_variables_small,))
                     job1.start()
                     uniform_jobs.append(job1)
@@ -511,11 +571,11 @@ if __name__ == '__main__':
                             for v in range(len(var_factors)):
                                 df["Y"]= data["Y_e_%s_%s%s%s"%(er,coef_simulation,u,v)] 
                                 df_small["Y"]= [data["Y_e_%s_%s%s%s"%(er,coef_simulation,u,v)][i] for i in [int(j.replace("ind","")) for j in small_sample_individuals]]
-                                job3 = Process(target=get_simulation_response, args=(data_range, GridSize ,sim, df, co_variables, 10,
+                                job3 = Process(target=get_simulation_response, args=(sufix, data_range, GridSize ,sim, df, co_variables, 10,
                                                                                         n_individuals, len(coef[1]), num_data_points, get_config_str(coef), indi, "Y", 'Individual',er,'%s'%distrib,"%s|%s"%(factors[u],var_factors[v]),test_variables,))
                                 job3.start()
                                 uniform_jobs.append(job3)
-                                job4 = Process(target=get_simulation_response, args=(data_range, GridSize ,sim, df_small, co_variables, 10,
+                                job4 = Process(target=get_simulation_response, args=(sufix, data_range, GridSize ,sim, df_small, co_variables, 10,
                                                                                         n_individuals_small, len(coef[1]), num_data_points, get_config_str(coef), small_sample_individuals, "Y", 'Individual',er,'%s'%distrib,"%s|%s"%(factors[u],var_factors[v]),test_variables_small,))
                                 job4.start()
                                 uniform_jobs.append(job4)
