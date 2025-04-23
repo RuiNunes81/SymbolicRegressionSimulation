@@ -59,7 +59,8 @@ class SymbolicDensityRegression:
     def __init__(self, grid_size, data_range):
         self.InitializeVariables(grid_size, data_range)        
         self.solvers=cp.settings.SOLVERS
-
+        
+        
     def update_symbolic_data(self, grid_size, data_range, co_variables, response, variable, df_quantile, variables=[]):
         self.GridSize = grid_size
         self.DataRange = data_range
@@ -181,6 +182,9 @@ class SymbolicDensityRegression:
         self.unp_dsd_y_hat = estimations
         self.dsd_r2_train = self.get_dsd_r2_value(betas, estimations, self.train_variables)
         self.dsd_r2_test = self.get_dsd_r2_value(betas, estimations, self.test_variable)
+        
+        self.dsd_train_TSS,self.dsd_train_RSS = self.get_dsd_TSS_RSS(betas, estimations, self.train_variables)
+        self.dsd_test_TSS,self.dsd_test_RSS = self.get_dsd_TSS_RSS(betas, estimations, self.test_variable)
         #self.dsd_r2_train_f = self.get_dsd_r2_value_functional(betas, self.train_variables)
         #self.dsd_r2_test_f = self.get_dsd_r2_value_functional(betas, self.test_variable)
         # self.dsd_r2_train_v2,self.sum_obs_est_trt_v2,self.sum_obs_mean_trt_v2,self.sum_est_mean_trt_v2 = self.get_dsd_r2_value_v2(betas, self.train_variables)
@@ -260,6 +264,19 @@ class SymbolicDensityRegression:
         
         return (estimated_value / observed_value)
     
+    def get_dsd_TSS_RSS(self, betas , estimations, variables):
+        tss = 0
+        rss = 0
+        indexes = get_indexes(self.Variables,variables) 
+        sacled_mean = self.get_mean_function(indexes)
+        for i in indexes:
+            #estimated=self.get_estimated(betas,i)
+            estimated=estimations[f"y_{i}"]
+            observed = self.quantile_df[self.response][i]
+            rss += integrate.simpson((observed-estimated)** 2,x=self.UsedPoints)
+            tss += integrate.simpson((observed-sacled_mean)** 2,x=self.UsedPoints)
+        
+        return tss, rss
     # def get_dsd_r2_value_functional(self, betas , variables):
     #     estimated_value = np.zeros(self.GridSize)
     #     observed_value = np.zeros(self.GridSize)
