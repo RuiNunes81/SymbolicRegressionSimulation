@@ -122,10 +122,15 @@ simulation_columns_1 = ['Simulation',
                         'DSD Adjusted R2 Training',
                         'DSD OOS R2 Test',
                         'DSD Coefs',
-                        'Test individuals'
+                        'Test individuals',
+                        'DSD TSS Train',
+                        'DSD RSS Train',
+                        'DSD TSS Test',
+                        'DSD RSS Test',
+                        
                     ]
 
-def get_simulation_response(sufix,data_range, GridSize ,simulation, data_Qf, co_variables, kfoldRepeats,
+def get_simulation_response(sufix, data_range, GridSize ,simulation, data_Qf, co_variables, kfoldRepeats,
                            n_individuals, n_regressors, num_data_points, CofficientsConfig,variables, response, 
                            variable,error,gen_type_des,var_factor,test_variables):
       
@@ -194,6 +199,10 @@ def get_simulation_response(sufix,data_range, GridSize ,simulation, data_Qf, co_
                     regression.dsd_r2_oos_v2,
                     str(list([round(b,4) for b in regression.unp_b])),
                     test_variables[k],
+                    dsd_train_TSS,
+                    dsd_train_RSS,
+                    dsd_test_TSS,
+                    dsd_test_TSS,
                     ))
        
         logging.info("       Ended K-folds (%s(%s|%s|%s|%s)) ",k,simulation,gen_type_des,error,var_factor) 
@@ -228,6 +237,10 @@ def get_simulation_response(sufix,data_range, GridSize ,simulation, data_Qf, co_
                 np.mean(tst_r2_oos),
                     "",
                     "",
+                    0,
+                    0,
+                    0,
+                    0,
                 ))
         
         df_simulation = pd.DataFrame(
